@@ -11,8 +11,11 @@ services:
       DB_HOST: db
       DB_USER: isucon
       DB_PASS: isucon
+    volumes:
+      - ".:/go/src/github.com/giwa/isucon11p"
     depends_on:
       - db
+      - redis
   db:
     image: mysql:8.0
     command: mysqld --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
@@ -25,3 +28,9 @@ services:
       BIND-ADDRESS: 0.0.0.0
     ports:
       - 33060:3306
+  redis:
+    image: "redis:latest"
+    ports:
+      - "6379:6379"
+    volumes:
+      - "./data/redis:/data"

@@ -9,13 +9,16 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/oklog/ulid/v2"
 )
 
 var (
-	db *sqlx.DB
+	db   *sqlx.DB
+	rdb  *redis.Client
+	rctx = context.Background()
 )
 
 var (
@@ -37,6 +40,15 @@ func init() {
 	user := Getenv("DB_USER", "isucon")
 	pass := Getenv("DB_PASS", "isucon")
 	name := Getenv("DB_NAME", "isucon2021_prior")
+
+	rhost := Getenv("RDB_HOST", "redis")
+	rport := Getenv("RDB_PORT", "6379")
+
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", rhost, rport),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
 
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=true", user, pass, host, port, name)
 

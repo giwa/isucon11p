@@ -1,0 +1,1 @@
+CREATE INDEX sche_id ON reservations (schedule_id);

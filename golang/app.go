@@ -48,17 +48,24 @@ type Reservation struct {
 	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 }
 
+func getUserFromRedis(key string) *User {
+	user := &User{}
+	juser, err := rdb.Get(rctx, key).Bytes()
+	if err != nil {
+		return nil
+	}
+	if err := json.Unmarshal(juser, user); err != nil {
+		return nil
+	}
+	return user
+}
+
 func getCurrentUser(r *http.Request) *User {
 	uidCookie, err := r.Cookie("user_id")
 	if err != nil || uidCookie == nil {
 		return nil
 	}
-	row := db.QueryRowxContext(r.Context(), "SELECT * FROM `users` WHERE `id` = ? LIMIT 1", uidCookie.Value)
-	user := &User{}
-	if err := row.StructScan(user); err != nil {
-		return nil
-	}
-	return user
+	return getUserFromRedis(uidCookie.Value)
 }
 
 func requiredLogin(w http.ResponseWriter, r *http.Request) bool {
@@ -120,8 +127,8 @@ func getReservationsCount(r *http.Request, s *Schedule) error {
 }
 
 func getUser(r *http.Request, id string) *User {
-	user := &User{}
-	if err := db.QueryRowxContext(r.Context(), "SELECT * FROM `users` WHERE `id` = ? LIMIT 1", id).StructScan(user); err != nil {
+	user := getUserFromRedis(id)
+	if user == nil {
 		return nil
 	}
 	if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
@@ -281,6 +288,13 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 		sendErrorJSON(w, err, 403)
 		return
 	}
+	buser, err := json.Marshal(user)
+	if err != nil {
+		sendErrorJSON(w, err, 403)
+		return
+	}
+
+	rdb.Set(rctx, user.ID, buser, 0)
 	cookie := &http.Cookie{
 		Name:     "user_id",
 		Value:    user.ID,
