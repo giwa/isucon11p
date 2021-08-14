@@ -358,6 +358,8 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now()
+
 	schedule := &Schedule{}
 	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		id := generateID(tx, "schedules")
@@ -366,17 +368,15 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `schedules` (`id`, `title`, `capacity`, `created_at`) VALUES (?, ?, ?, NOW(6))",
-			id, title, capacity,
+			"INSERT INTO `schedules` (`id`, `title`, `capacity`, `created_at`) VALUES (?, ?, ?, ?)",
+			id, title, capacity, now.Format("2006-01-02 15:04:05.000"),
 		); err != nil {
-			return err
-		}
-		if err := tx.QueryRowContext(ctx, "SELECT `created_at` FROM `schedules` WHERE `id` = ?", id).Scan(&schedule.CreatedAt); err != nil {
 			return err
 		}
 		schedule.ID = id
 		schedule.Title = title
 		schedule.Capacity = capacity
+		schedule.CreatedAt = now
 
 		return nil
 	})
