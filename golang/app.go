@@ -397,7 +397,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		id := generateID(tx, "schedules")
 
-		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ? FOR UPDATE", scheduleID)
+		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
 		if err != nil && err != sql.ErrNoRows {
 			return sendErrorJSON(w, err, 500)
 		}
