@@ -397,6 +397,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 	scheduleID := r.PostFormValue("schedule_id")
 	userID := getCurrentUser(r).ID
+	user := &User{}
 
 	var capacity int
 
@@ -407,7 +408,6 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
 		}
 
-		user := &User{}
 		r := rdb.Get(rctx, userID)
 		if r.Err() == redis.Nil {
 			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
