@@ -101,14 +101,22 @@ func requiredStaffLogin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func getReservations(r *http.Request, s *Schedule) error {
-	rows, err := db.QueryxContext(r.Context(), "SELECT * FROM `reservations` WHERE `schedule_id` = ?", s.ID)
-	if err != nil {
-		return err
+	var rows *sqlx.Rows
+	var err error
+	if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
+		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_email, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
+		if err != nil {
+			return err
+		}
+	} else {
+		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
+		if err != nil {
+			return err
+		}
 	}
 
 	defer rows.Close()
 
-	reserved := 0
 	s.Reservations = []*Reservation{}
 	for rows.Next() {
 		ureservation := &UserReservation{}
@@ -129,14 +137,9 @@ func getReservations(r *http.Request, s *Schedule) error {
 			},
 			CreatedAt: ureservation.CreatedAt,
 		}
-		if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
-			reservation.User.Email = ""
-		}
 
 		s.Reservations = append(s.Reservations, reservation)
-		reserved++
 	}
-	s.Reserved = reserved
 
 	return nil
 }
@@ -402,14 +405,16 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	userID := getCurrentUser(r).ID
 	user := &User{}
 	now := time.Now()
-
-	var capacity int
+	schedule := &Schedule{}
 
 	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		found := 0
-		tx.QueryRowContext(ctx, "SELECT 1 FROM `schedules` WHERE `id` = ? LIMIT 1", scheduleID).Scan(&found)
-		if found != 1 {
+		// join
+		if err := tx.QueryRowxContext(ctx, "SELECT reserved, capacity FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE ", scheduleID).StructScan(schedule); err != nil {
 			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
+		}
+
+		if schedule.Reserved >= schedule.Capacity {
+			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
 		}
 
 		r := rdb.Get(rctx, userID)
@@ -425,39 +430,23 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
 		}
 
-		found = 0
+		found := 0
 		tx.QueryRowContext(ctx, "SELECT 1 FROM `reservations` WHERE `schedule_id` = ? AND `user_id` = ? LIMIT 1", scheduleID, userID).Scan(&found)
 		if found == 1 {
 			return sendErrorJSON(w, fmt.Errorf("already taken"), 403)
-		}
-
-		if err := tx.QueryRowContext(ctx, "SELECT `capacity` FROM `schedules` WHERE `id` = ? LIMIT 1", scheduleID).Scan(&capacity); err != nil {
-			return sendErrorJSON(w, err, 500)
 		}
 
 		return nil
 	})
 	if err != nil {
 		sendErrorJSON(w, err, 500)
+		return
 	}
 
 	reservation := &Reservation{}
 	var genid string
 	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		id := generateID(tx, "schedules")
-
-		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
-		if err != nil && err != sql.ErrNoRows {
-			return sendErrorJSON(w, err, 500)
-		}
-		reserved := 0
-		for rows.Next() {
-			reserved++
-		}
-
-		if reserved >= capacity {
-			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
-		}
 
 		if _, err := tx.ExecContext(
 			ctx,
@@ -468,28 +457,29 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		genid = id
+		reserved := schedule.Reserved + 1
+
+		if _, err := tx.ExecContext(
+			ctx,
+			"UPDATE `schedules` SET `reserved` = ? WHERE `id` = ?",
+			reserved, scheduleID,
+		); err != nil {
+			return err
+		}
 
 		return nil
 	})
 	if err != nil {
 		sendErrorJSON(w, err, 500)
+		return
 	}
 
-	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		var createdAt time.Time
-		if err := tx.QueryRowContext(ctx, "SELECT `created_at` FROM `reservations` WHERE `id` = ?", genid).Scan(&createdAt); err != nil {
-			return err
-		}
-		reservation.ID = genid
-		reservation.ScheduleID = scheduleID
-		reservation.UserID = userID
-		reservation.CreatedAt = createdAt
+	reservation.ID = genid
+	reservation.ScheduleID = scheduleID
+	reservation.UserID = userID
+	reservation.CreatedAt = now
 
-		return sendJSON(w, reservation, 200)
-	})
-	if err != nil {
-		sendErrorJSON(w, err, 500)
-	}
+	sendJSON(w, reservation, 200)
 }
 
 func schedulesHandler(w http.ResponseWriter, r *http.Request) {
@@ -506,10 +496,6 @@ func schedulesHandler(w http.ResponseWriter, r *http.Request) {
 			sendErrorJSON(w, err, 500)
 			return
 		}
-		if err := getReservationsCount(r, schedule); err != nil {
-			sendErrorJSON(w, err, 500)
-			return
-		}
 		schedules = append(schedules, schedule)
 	}
 
@@ -520,6 +506,7 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 
+	// joins
 	schedule := &Schedule{}
 	if err := db.QueryRowxContext(r.Context(), "SELECT * FROM `schedules` WHERE `id` = ? LIMIT 1", id).StructScan(schedule); err != nil {
 
