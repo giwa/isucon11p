@@ -22,6 +22,7 @@ import (
 var (
 	publicDir string
 	fs        http.Handler
+	cacheMap  = make(map[string]*User)
 )
 
 type User struct {
@@ -406,6 +407,8 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	user := &User{}
 	now := time.Now()
 	schedule := &Schedule{}
+	reservation := &Reservation{}
+	var genid string
 
 	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		// join
@@ -436,16 +439,6 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return sendErrorJSON(w, fmt.Errorf("already taken"), 403)
 		}
 
-		return nil
-	})
-	if err != nil {
-		sendErrorJSON(w, err, 500)
-		return
-	}
-
-	reservation := &Reservation{}
-	var genid string
-	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		id := generateID(tx, "schedules")
 
 		if _, err := tx.ExecContext(
