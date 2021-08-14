@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"github.com/rs/xid"
 	"log"
 	"math/rand"
 	"os"
 	"time"
+
+	"github.com/rs/xid"
 
 	"github.com/go-redis/redis/v8"
 	_ "github.com/go-sql-driver/mysql"
