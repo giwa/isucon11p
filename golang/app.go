@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/go-redis/redis/v8"
 	"io"
@@ -63,6 +64,10 @@ type UserReservation struct {
 
 func getUserFromRedis(key string) *User {
 	user := &User{}
+	user, ok := cacheMap[key]
+	if ok {
+		return user
+	}
 	r := rdb.Get(rctx, key)
 	if r.Err() == redis.Nil {
 		return nil
@@ -74,6 +79,7 @@ func getUserFromRedis(key string) *User {
 	if err := json.Unmarshal(juser, user); err != nil {
 		return nil
 	}
+	cacheMap[key] = user
 	return user
 }
 
@@ -281,33 +287,24 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := &User{}
+	email := r.FormValue("email")
+	nickname := r.FormValue("nickname")
+	id := generateID(nil, "users")
+	createdAt := time.Now()
 
-	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		email := r.FormValue("email")
-		nickname := r.FormValue("nickname")
-		id := generateID(tx, "users")
-		createdAt := time.Now()
+	user.ID = id
+	user.Email = email
+	user.Nickname = nickname
+	user.CreatedAt = createdAt
+	buser, err := json.Marshal(user)
+	if err != nil {
+		sendErrorJSON(w, err, 500)
+		return
+	}
 
-		if _, err := tx.ExecContext(
-			ctx,
-			"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, ?)",
-			id, email, nickname, createdAt.Format("2006-01-02 15:04:05.000"),
-		); err != nil {
-			return err
-		}
-		user.ID = id
-		user.Email = email
-		user.Nickname = nickname
-		user.CreatedAt = createdAt
-		buser, err := json.Marshal(user)
-		if err != nil {
-			return err
-		}
-
-		rdb.Set(rctx, user.ID, buser, 0)
-
-		return nil
-	})
+	rdb.Set(rctx, user.ID, buser, 0)
+	// user?
+	rdb.Set(rctx, user.Email, buser, 0)
 
 	if err != nil {
 		sendErrorJSON(w, err, 500)
@@ -323,23 +320,19 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := r.PostFormValue("email")
-	user := &User{}
-
-	if err := db.QueryRowxContext(
-		r.Context(),
-		"SELECT * FROM `users` WHERE `email` = ? LIMIT 1",
-		email,
-	).StructScan(user); err != nil {
-		sendErrorJSON(w, err, 403)
-		return
-	}
-	buser, err := json.Marshal(user)
-	if err != nil {
-		sendErrorJSON(w, err, 403)
+	user := getUserFromRedis(email)
+	if user == nil {
+		sendErrorJSON(w, errors.New("user not found"), 403)
 		return
 	}
 
-	rdb.Set(rctx, user.ID, buser, 0)
+	// buser, err := json.Marshal(user)
+	// if err != nil {
+	// 	sendErrorJSON(w, err, 403)
+	// 	return
+	// }
+
+	// rdb.Set(rctx, user.ID, buser, 0)
 	cookie := &http.Cookie{
 		Name:     "user_id",
 		Value:    user.ID,
