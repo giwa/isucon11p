@@ -161,6 +161,7 @@ func serveMux() http.Handler {
 	if err != nil {
 		log.Fatal(err)
 	}
+	rdb.FlushAll(rctx)
 	publicDir = dir
 	fs = http.FileServer(http.Dir(publicDir))
 
