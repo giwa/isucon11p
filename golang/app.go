@@ -334,10 +334,6 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func createReservationHandler(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	// 処理
-	here1 := time.Now()
-	fmt.Printf("here1 %d msec\n", here1.Sub(start).Milliseconds())
 	if err := parseForm(r); err != nil {
 		sendErrorJSON(w, err, 500)
 		return
@@ -352,39 +348,29 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		id := generateID(tx, "schedules")
 		scheduleID := r.PostFormValue("schedule_id")
 		userID := getCurrentUser(r).ID
-		here2 := time.Now()
-		fmt.Printf("here2 %d msec\n", here2.Sub(start).Milliseconds())
 
 		found := 0
 		tx.QueryRowContext(ctx, "SELECT 1 FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE", scheduleID).Scan(&found)
 		if found != 1 {
 			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
 		}
-		here3 := time.Now()
-		fmt.Printf("here3 %d msec\n", here3.Sub(start).Milliseconds())
 
 		found = 0
 		tx.QueryRowContext(ctx, "SELECT 1 FROM `users` WHERE `id` = ? LIMIT 1", userID).Scan(&found)
 		if found != 1 {
 			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
 		}
-		here4 := time.Now()
-		fmt.Printf("here4 %d msec\n", here4.Sub(start).Milliseconds())
 
 		found = 0
 		tx.QueryRowContext(ctx, "SELECT 1 FROM `reservations` WHERE `schedule_id` = ? AND `user_id` = ? LIMIT 1", scheduleID, userID).Scan(&found)
 		if found == 1 {
 			return sendErrorJSON(w, fmt.Errorf("already taken"), 403)
 		}
-		here5 := time.Now()
-		fmt.Printf("here5 %d msec\n", here5.Sub(start).Milliseconds())
 
 		capacity := 0
 		if err := tx.QueryRowContext(ctx, "SELECT `capacity` FROM `schedules` WHERE `id` = ? LIMIT 1", scheduleID).Scan(&capacity); err != nil {
 			return sendErrorJSON(w, err, 500)
 		}
-		here6 := time.Now()
-		fmt.Printf("here6 %d msec\n", here6.Sub(start).Milliseconds())
 
 		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
 		if err != nil && err != sql.ErrNoRows {
@@ -394,8 +380,6 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			reserved++
 		}
-		here7 := time.Now()
-		fmt.Printf("here7 %d msec\n", here7.Sub(start).Milliseconds())
 
 		if reserved >= capacity {
 			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
@@ -408,15 +392,11 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		); err != nil {
 			return err
 		}
-		here8 := time.Now()
-		fmt.Printf("here8 %d msec\n", here8.Sub(start).Milliseconds())
 
 		var createdAt time.Time
 		if err := tx.QueryRowContext(ctx, "SELECT `created_at` FROM `reservations` WHERE `id` = ?", id).Scan(&createdAt); err != nil {
 			return err
 		}
-		here9 := time.Now()
-		fmt.Printf("here9 %d msec\n", here9.Sub(start).Milliseconds())
 		reservation.ID = id
 		reservation.ScheduleID = scheduleID
 		reservation.UserID = userID
