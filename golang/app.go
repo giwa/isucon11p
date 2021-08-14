@@ -357,14 +357,14 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reservation := &Reservation{}
-	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		id := generateID(tx, "schedules")
-		scheduleID := r.PostFormValue("schedule_id")
-		userID := getCurrentUser(r).ID
+	scheduleID := r.PostFormValue("schedule_id")
+	userID := getCurrentUser(r).ID
 
+	var capacity int
+
+	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		found := 0
-		tx.QueryRowContext(ctx, "SELECT 1 FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE", scheduleID).Scan(&found)
+		tx.QueryRowContext(ctx, "SELECT 1 FROM `schedules` WHERE `id` = ? LIMIT 1", scheduleID).Scan(&found)
 		if found != 1 {
 			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
 		}
@@ -381,12 +381,22 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return sendErrorJSON(w, fmt.Errorf("already taken"), 403)
 		}
 
-		capacity := 0
 		if err := tx.QueryRowContext(ctx, "SELECT `capacity` FROM `schedules` WHERE `id` = ? LIMIT 1", scheduleID).Scan(&capacity); err != nil {
 			return sendErrorJSON(w, err, 500)
 		}
 
-		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
+		return nil
+	})
+	if err != nil {
+		sendErrorJSON(w, err, 500)
+	}
+
+	reservation := &Reservation{}
+	var genid string
+	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
+		id := generateID(tx, "schedules")
+
+		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ? FOR UPDATE", scheduleID)
 		if err != nil && err != sql.ErrNoRows {
 			return sendErrorJSON(w, err, 500)
 		}
@@ -407,11 +417,20 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		genid = id
+
+		return nil
+	})
+	if err != nil {
+		sendErrorJSON(w, err, 500)
+	}
+
+	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		var createdAt time.Time
-		if err := tx.QueryRowContext(ctx, "SELECT `created_at` FROM `reservations` WHERE `id` = ?", id).Scan(&createdAt); err != nil {
+		if err := tx.QueryRowContext(ctx, "SELECT `created_at` FROM `reservations` WHERE `id` = ?", genid).Scan(&createdAt); err != nil {
 			return err
 		}
-		reservation.ID = id
+		reservation.ID = genid
 		reservation.ScheduleID = scheduleID
 		reservation.UserID = userID
 		reservation.CreatedAt = createdAt
