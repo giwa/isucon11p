@@ -130,6 +130,9 @@ func getReservations(r *http.Request, s *Schedule) error {
 			},
 			CreatedAt: ureservation.CreatedAt,
 		}
+		if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
+			reservation.User.Email = ""
+		}
 
 		s.Reservations = append(s.Reservations, reservation)
 		reserved++
@@ -280,19 +283,19 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		nickname := r.FormValue("nickname")
 		id := generateID(tx, "users")
-		created_at := time.Now()
+		createdAt := time.Now()
 
 		if _, err := tx.ExecContext(
 			ctx,
 			"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, ?)",
-			id, email, nickname, created_at.String(),
+			id, email, nickname, createdAt.Format("2006-01-02 15:04:05.000"),
 		); err != nil {
 			return err
 		}
 		user.ID = id
 		user.Email = email
 		user.Nickname = nickname
-		user.CreatedAt = created_at
+		user.CreatedAt = createdAt
 		buser, err := json.Marshal(user)
 		if err != nil {
 			return err
@@ -399,6 +402,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	scheduleID := r.PostFormValue("schedule_id")
 	userID := getCurrentUser(r).ID
 	user := &User{}
+	now := time.Now()
 
 	var capacity int
 
@@ -461,8 +465,8 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, NOW(6), ?, ?, ?, ?)",
-			id, scheduleID, userID, user.Email, user.Nickname, user.Staff, user.CreatedAt,
+			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			id, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
 		); err != nil {
 			return err
 		}
