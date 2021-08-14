@@ -213,11 +213,19 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		id := generateID(tx, "users")
+		// id := generateID(tx, "users")
+		// if _, err := tx.ExecContext(
+		// 	ctx,
+		// 	"INSERT INTO `users` (`id`, `email`, `nickname`, `staff`, `created_at`) VALUES (?, ?, ?, true, NOW(6))",
+		// 	id,
+		// 	"isucon2021_prior@isucon.net",
+		// 	"isucon",
+		// ); err != nil {
+		// 	return err
+		// }
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `users` (`id`, `email`, `nickname`, `staff`, `created_at`) VALUES (?, ?, ?, true, NOW(6))",
-			id,
+			"INSERT INTO `users` (`email`, `nickname`, `staff`, `created_at`) VALUES (?, ?, true, NOW(6))",
 			"isucon2021_prior@isucon.net",
 			"isucon",
 		); err != nil {
@@ -248,12 +256,19 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		email := r.FormValue("email")
 		nickname := r.FormValue("nickname")
-		id := generateID(tx, "users")
+		// id := generateID(tx, "users")
 
+		// if _, err := tx.ExecContext(
+		// 	ctx,
+		// 	"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, NOW(6))",
+		// 	id, email, nickname,
+		// ); err != nil {
+		// 	return err
+		// }
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, NOW(6))",
-			id, email, nickname,
+			"INSERT INTO `users` (`email`, `nickname`, `created_at`) VALUES (?, ?, NOW(6))",
+			email, nickname,
 		); err != nil {
 			return err
 		}
