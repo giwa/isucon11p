@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 
 	"github.com/gorilla/mux"
 	"github.com/jmoiron/sqlx"
@@ -442,14 +443,17 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		id := generateID(tx, "schedules")
 
-		rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
-		if err != nil && err != sql.ErrNoRows {
-			return sendErrorJSON(w, err, 500)
-		}
 		reserved := 0
-		for rows.Next() {
-			reserved++
-		}
+		tx.QueryRowContext(ctx, "SELECT `reserved` FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE", scheduleID).Scan(&reserved)
+
+		// rows, err := tx.QueryContext(ctx, "SELECT * FROM `reservations` WHERE `schedule_id` = ?", scheduleID)
+		// if err != nil && err != sql.ErrNoRows {
+		// 	return sendErrorJSON(w, err, 500)
+		// }
+		// reserved := 0
+		// for rows.Next() {
+		// 	reserved++
+		// }
 
 		if reserved >= capacity {
 			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
@@ -464,6 +468,16 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		genid = id
+
+		reserved++
+
+		if _, err := tx.ExecContext(
+			ctx,
+			"UPDATE `schedules` SET `reserved` = ? WHERE `id` = ?",
+			reserved, scheduleID,
+		); err != nil {
+			return err
+		}
 
 		return nil
 	})
@@ -502,10 +516,10 @@ func schedulesHandler(w http.ResponseWriter, r *http.Request) {
 			sendErrorJSON(w, err, 500)
 			return
 		}
-		if err := getReservationsCount(r, schedule); err != nil {
-			sendErrorJSON(w, err, 500)
-			return
-		}
+		// if err := getReservationsCount(r, schedule); err != nil {
+		// 	sendErrorJSON(w, err, 500)
+		// 	return
+		// }
 		schedules = append(schedules, schedule)
 	}
 
