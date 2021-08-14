@@ -255,17 +255,24 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(ctx, "TRUNCATE `users`"); err != nil {
 			return err
 		}
+		user := &User{
+			ID:       generateID(tx, "users"),
+			Email:    "isucon2021_prior@isucon.net",
+			Nickname: "isucon",
+			Staff:    true,
+		}
+		buser, err := json.Marshal(user)
 
-		id := generateID(tx, "users")
-		if _, err := tx.ExecContext(
-			ctx,
-			"INSERT INTO `users` (`id`, `email`, `nickname`, `staff`, `created_at`) VALUES (?, ?, ?, true, NOW(6))",
-			id,
-			"isucon2021_prior@isucon.net",
-			"isucon",
-		); err != nil {
+		if err != nil {
+			sendErrorJSON(w, err, 500)
 			return err
 		}
+
+		rdb.Set(rctx, user.ID, buser, 0)
+		// user?
+		rdb.Set(rctx, user.Email, buser, 0)
+		cacheMap[user.ID] = user
+		cacheMap[user.Email] = user
 
 		return nil
 	})
@@ -305,6 +312,9 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 	rdb.Set(rctx, user.ID, buser, 0)
 	// user?
 	rdb.Set(rctx, user.Email, buser, 0)
+
+	cacheMap[user.ID] = user
+	cacheMap[user.Email] = user
 
 	if err != nil {
 		sendErrorJSON(w, err, 500)
