@@ -2,7 +2,7 @@ USE `isucon2021_prior`;
 
 DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
-  `id`         MEDIUMINT PRIMARY KEY NOT NULL AUTO_INCREMENT,
+  `id`         VARCHAR(255) PRIMARY KEY NOT NULL,
   `email`      VARCHAR(255) NOT NULL DEFAULT '',
   `nickname`   VARCHAR(120) NOT NULL DEFAULT '',
   `staff`      BOOLEAN NOT NULL DEFAULT false,
@@ -21,7 +21,7 @@ DROP TABLE IF EXISTS `reservations`;
 CREATE TABLE `reservations` (
   `id`          VARCHAR(255) PRIMARY KEY NOT NULL,
   `schedule_id` VARCHAR(255) NOT NULL,
-  `user_id`     MEDIUMINT NOT NULL,
+  `user_id`     VARCHAR(255) NOT NULL,
   `created_at`  DATETIME(6) NOT NULL,
   `user_email`  VARCHAR(255) NOT NULL DEFAULT '',
   `user_nickname` VARCHAR(120) NOT NULL DEFAULT '',
