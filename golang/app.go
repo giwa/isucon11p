@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/go-redis/redis/v8"
 	"io"
 	"log"
 	"net/http"
@@ -48,9 +49,24 @@ type Reservation struct {
 	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 }
 
+type UserReservation struct {
+	ID            string    `db:"id"`
+	ScheduleID    string    `db:"schedule_id"`
+	UserID        string    `db:"user_id"`
+	CreatedAt     time.Time `db:"created_at"`
+	UserEmail     string    `db:"user_email"`
+	UserNickname  string    `db:"user_nickname"`
+	UserStaff     bool      `db:"user_staff"`
+	UserCreatedAt time.Time `db:"user_created_at"`
+}
+
 func getUserFromRedis(key string) *User {
 	user := &User{}
-	juser, err := rdb.Get(rctx, key).Bytes()
+	r := rdb.Get(rctx, key)
+	if r.Err() == redis.Nil {
+		return nil
+	}
+	juser, err := r.Bytes()
 	if err != nil {
 		return nil
 	}
@@ -95,11 +111,24 @@ func getReservations(r *http.Request, s *Schedule) error {
 	reserved := 0
 	s.Reservations = []*Reservation{}
 	for rows.Next() {
-		reservation := &Reservation{}
-		if err := rows.StructScan(reservation); err != nil {
+		ureservation := &UserReservation{}
+		if err := rows.StructScan(ureservation); err != nil {
 			return err
 		}
-		reservation.User = getUser(r, reservation.UserID)
+
+		reservation := &Reservation{
+			ID:         ureservation.ID,
+			ScheduleID: ureservation.ScheduleID,
+			UserID:     ureservation.UserID,
+			User: &User{
+				ID:        ureservation.UserID,
+				Email:     ureservation.UserEmail,
+				Nickname:  ureservation.UserNickname,
+				Staff:     ureservation.UserStaff,
+				CreatedAt: ureservation.UserCreatedAt,
+			},
+			CreatedAt: ureservation.CreatedAt,
+		}
 
 		s.Reservations = append(s.Reservations, reservation)
 		reserved++
@@ -249,19 +278,27 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		email := r.FormValue("email")
 		nickname := r.FormValue("nickname")
 		id := generateID(tx, "users")
+		created_at := time.Now()
 
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, NOW(6))",
-			id, email, nickname,
+			"INSERT INTO `users` (`id`, `email`, `nickname`, `created_at`) VALUES (?, ?, ?, ?)",
+			id, email, nickname, created_at.String(),
 		); err != nil {
 			return err
 		}
 		user.ID = id
 		user.Email = email
 		user.Nickname = nickname
+		user.CreatedAt = created_at
+		buser, err := json.Marshal(user)
+		if err != nil {
+			return err
+		}
 
-		return tx.QueryRowContext(ctx, "SELECT `created_at` FROM `users` WHERE `id` = ? LIMIT 1", id).Scan(&user.CreatedAt)
+		rdb.Set(rctx, user.ID, buser, 0)
+
+		return nil
 	})
 
 	if err != nil {
@@ -377,9 +414,17 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		here3 := time.Now()
 		fmt.Printf("here3 %d msec\n", here3.Sub(start).Milliseconds())
 
-		found = 0
-		tx.QueryRowContext(ctx, "SELECT 1 FROM `users` WHERE `id` = ? LIMIT 1", userID).Scan(&found)
-		if found != 1 {
+		user := &User{}
+		r := rdb.Get(rctx, userID)
+		if r.Err() == redis.Nil {
+			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
+		}
+		buser, err := r.Bytes()
+		if err != nil {
+			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
+		}
+		err = json.Unmarshal(buser, user)
+		if err != nil {
 			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
 		}
 		here4 := time.Now()
@@ -417,8 +462,8 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 		if _, err := tx.ExecContext(
 			ctx,
-			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`) VALUES (?, ?, ?, NOW(6))",
-			id, scheduleID, userID,
+			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, NOW(6), ?, ?, ?, ?)",
+			id, scheduleID, userID, user.Email, user.Nickname, user.Staff, user.CreatedAt,
 		); err != nil {
 			return err
 		}
