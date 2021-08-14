@@ -6,9 +6,8 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 
 echo 'Restarting Go...'
 cd $DIR/golang/
-go build -o bin/webapp .
+make
 sudo systemctl stop web-golang.service
-cp bin/webapp /home/isucon/webapp/golang/bin/
 cd $DIR
 sudo systemctl restart web-golang.service
 echo 'Restarted!'
