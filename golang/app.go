@@ -104,12 +104,12 @@ func getReservations(r *http.Request, s *Schedule) error {
 	var rows *sqlx.Rows
 	var err error
 	if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
-		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_email, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
+		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
 		if err != nil {
 			return err
 		}
 	} else {
-		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
+		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_email, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
 		if err != nil {
 			return err
 		}
