@@ -22,5 +22,9 @@ CREATE TABLE `reservations` (
   `id`          VARCHAR(255) PRIMARY KEY NOT NULL,
   `schedule_id` VARCHAR(255) NOT NULL,
   `user_id`     VARCHAR(255) NOT NULL,
-  `created_at`  DATETIME(6) NOT NULL
+  `created_at`  DATETIME(6) NOT NULL,
+  `user_email`  VARCHAR(255) NOT NULL DEFAULT '',
+  `user_nickname` VARCHAR(120) NOT NULL DEFAULT '',
+  `user_staff`  BOOLEAN NOT NULL DEFAULT false,
+  `user_created_at` DATETIME(6) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4;
