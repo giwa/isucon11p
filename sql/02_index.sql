@@ -1,1 +1,1 @@
-CREATE INDEX sche_id ON reservations (schedule_id);
+CREATE INDEX scheid_userid_idx ON reservations (schedule_id, user_id);
