@@ -210,7 +210,14 @@ func serveMux() http.Handler {
 
 	router.PathPrefix("/").HandlerFunc(htmlHandler)
 
-	return logger(router)
+	// return logger(router)
+	return nonLogger(router)
+}
+
+func nonLogger(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r)
+	})
 }
 
 func logger(handler http.Handler) http.Handler {
