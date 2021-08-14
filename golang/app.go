@@ -129,6 +129,9 @@ func getReservations(r *http.Request, s *Schedule) error {
 			},
 			CreatedAt: ureservation.CreatedAt,
 		}
+		if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
+			reservation.User.Email = ""
+		}
 
 		s.Reservations = append(s.Reservations, reservation)
 		reserved++
