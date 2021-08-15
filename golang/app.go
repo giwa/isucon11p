@@ -101,17 +101,18 @@ func getScheduleCapacityFromCache(key string) (int, bool) {
 	if ok {
 		return capacity, true
 	}
-	r := rdb.Get(rctx, key)
-	if r.Err() == redis.Nil {
-		return 0, false
-	}
-	capacity, err := r.Int()
-	if err != nil {
-		return 0, false
-	}
+	return 0, false
+	// r := rdb.Get(rctx, key)
+	// if r.Err() == redis.Nil {
+	// 	return 0, false
+	// }
+	// capacity, err := r.Int()
+	// if err != nil {
+	// 	return 0, false
+	// }
 
-	scheduleCapacityMap[key] = capacity
-	return capacity, true
+	// scheduleCapacityMap[key] = capacity
+	// return capacity, true
 }
 
 func getCurrentUser(r *http.Request) *User {
@@ -409,7 +410,9 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		sendErrorJSON(w, err, 500)
 		return
 	}
-	rdb.Set(rctx, id, capacity, 0)
+	// reserved
+	rdb.Set(rctx, id, 0, 0)
+
 	scheduleCapacityMap[id] = capacity
 
 	schedule.ID = id
