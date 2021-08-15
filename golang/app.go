@@ -482,7 +482,9 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Printf("capacity: %d", capacity)
+	fmt.Printf("capacity: %d\n", capacity)
+	i, _ := rdb.Get(rctx, scheduleID).Int()
+	fmt.Printf("reserved: %d\n", i)
 	for {
 		err := rdb.Watch(rctx, runTx(scheduleID, capacity), scheduleID)
 		if err == nil {
