@@ -95,7 +95,7 @@ func getUserFromCache(key string) *User {
 }
 
 func getScheduleCapacityFromCache(key string) (int, bool) {
-	scheduleMu.RUnlock()
+	scheduleMu.RLock()
 	defer scheduleMu.RUnlock()
 	capacity, ok := scheduleCapacityMap[key]
 	if ok {
