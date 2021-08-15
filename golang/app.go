@@ -510,17 +510,8 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	reserveMu.Unlock()
 
 	// ensure capacity is not full
-	// need lock?
-	_, err := db.Exec(
-		"UPDATE `schedules` SET `reserved` = reserved + 1 WHERE `id` = ?",
-		scheduleID,
-	)
-	if err != nil {
-		sendErrorJSON(w, fmt.Errorf("schedule udpate failed"), 500)
-		return
-	}
 
-	_, err = db.Exec(
+	_, err := db.Exec(
 		"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		reservationID, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
 	)
@@ -551,6 +542,13 @@ func schedulesHandler(w http.ResponseWriter, r *http.Request) {
 			sendErrorJSON(w, err, 500)
 			return
 		}
+
+		n, err := rdb.Get(rctx, schedule.ID).Int()
+		if err != nil && err != redis.Nil {
+			sendErrorJSON(w, err, 500)
+			return
+		}
+		schedule.Reserved = n
 		schedules = append(schedules, schedule)
 	}
 
@@ -569,6 +567,15 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scheduleMu.RUnlock()
+
+	n, err := rdb.Get(rctx, schedule.ID).Int()
+	if err != nil && err != redis.Nil {
+		sendErrorJSON(w, err, 500)
+		return
+	} else if err != nil && err == redis.Nil {
+		n = 0
+	}
+	schedule.Reserved = n
 
 	if err := getReservations(r, schedule); err != nil {
 		sendErrorJSON(w, err, 500)
