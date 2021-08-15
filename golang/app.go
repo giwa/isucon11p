@@ -278,6 +278,10 @@ type initializeResponse struct {
 }
 
 func initializeHandler(w http.ResponseWriter, r *http.Request) {
+	cacheMap = make(map[string]*User)
+	reservedMap = make(map[string]bool)
+	scheduleCapacityMap = make(map[string]int)
+
 	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(ctx, "TRUNCATE `reservations`"); err != nil {
 			return err
