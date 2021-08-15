@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -21,9 +22,14 @@ import (
 )
 
 var (
-	publicDir string
-	fs        http.Handler
-	cacheMap  = make(map[string]*User)
+	publicDir           string
+	fs                  http.Handler
+	cacheMap            = make(map[string]*User)
+	reservedMap         = make(map[string]bool)
+	scheduleCapacityMap = make(map[string]int)
+	reserveMu           sync.RWMutex
+	userMu              sync.RWMutex
+	scheduleMu          sync.RWMutex
 )
 
 type User struct {
@@ -62,7 +68,11 @@ type UserReservation struct {
 	UserCreatedAt time.Time `db:"user_created_at"`
 }
 
-func getUserFromRedis(key string) *User {
+// user exist in cache atomically
+func getUserFromCache(key string) *User {
+	userMu.RLock()
+	defer userMu.RUnlock()
+
 	user := &User{}
 	user, ok := cacheMap[key]
 	if ok {
@@ -79,8 +89,29 @@ func getUserFromRedis(key string) *User {
 	if err := json.Unmarshal(juser, user); err != nil {
 		return nil
 	}
+
 	cacheMap[key] = user
 	return user
+}
+
+func getScheduleCapacityFromCache(key string) (int, bool) {
+	scheduleMu.RUnlock()
+	defer scheduleMu.RUnlock()
+	capacity, ok := scheduleCapacityMap[key]
+	if ok {
+		return capacity, true
+	}
+	r := rdb.Get(rctx, key)
+	if r.Err() == redis.Nil {
+		return 0, false
+	}
+	capacity, err := r.Int()
+	if err != nil {
+		return 0, false
+	}
+
+	scheduleCapacityMap[key] = capacity
+	return capacity, true
 }
 
 func getCurrentUser(r *http.Request) *User {
@@ -88,7 +119,7 @@ func getCurrentUser(r *http.Request) *User {
 	if err != nil || uidCookie == nil {
 		return nil
 	}
-	return getUserFromRedis(uidCookie.Value)
+	return getUserFromCache(uidCookie.Value)
 }
 
 func requiredLogin(w http.ResponseWriter, r *http.Request) bool {
@@ -110,6 +141,7 @@ func requiredStaffLogin(w http.ResponseWriter, r *http.Request) bool {
 func getReservations(r *http.Request, s *Schedule) error {
 	var rows *sqlx.Rows
 	var err error
+	// FIXME: refactor
 	if getCurrentUser(r) != nil && !getCurrentUser(r).Staff {
 		rows, err = db.QueryxContext(r.Context(), "SELECT id, schedule_id, user_id, created_at, user_nickname, user_staff, user_created_at FROM `reservations` WHERE `schedule_id` = ?", s.ID)
 		if err != nil {
@@ -169,7 +201,7 @@ func getReservationsCount(r *http.Request, s *Schedule) error {
 }
 
 func getUser(r *http.Request, id string) *User {
-	user := getUserFromRedis(id)
+	user := getUserFromCache(id)
 	if user == nil {
 		return nil
 	}
@@ -267,7 +299,8 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 			sendErrorJSON(w, err, 500)
 			return err
 		}
-
+		userMu.Lock()
+		defer userMu.Unlock()
 		rdb.Set(rctx, user.ID, buser, 0)
 		// user?
 		rdb.Set(rctx, user.Email, buser, 0)
@@ -309,8 +342,9 @@ func signupHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userMu.Lock()
+	defer userMu.Unlock()
 	rdb.Set(rctx, user.ID, buser, 0)
-	// user?
 	rdb.Set(rctx, user.Email, buser, 0)
 
 	cacheMap[user.ID] = user
@@ -330,19 +364,12 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	email := r.PostFormValue("email")
-	user := getUserFromRedis(email)
+	user := getUserFromCache(email)
 	if user == nil {
 		sendErrorJSON(w, errors.New("user not found"), 403)
 		return
 	}
 
-	// buser, err := json.Marshal(user)
-	// if err != nil {
-	// 	sendErrorJSON(w, err, 403)
-	// 	return
-	// }
-
-	// rdb.Set(rctx, user.ID, buser, 0)
 	cookie := &http.Cookie{
 		Name:     "user_id",
 		Value:    user.ID,
@@ -366,33 +393,56 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-
 	schedule := &Schedule{}
-	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		id := generateID(tx, "schedules")
-		title := r.PostFormValue("title")
-		capacity, _ := strconv.Atoi(r.PostFormValue("capacity"))
 
-		if _, err := tx.ExecContext(
-			ctx,
-			"INSERT INTO `schedules` (`id`, `title`, `capacity`, `created_at`) VALUES (?, ?, ?, ?)",
-			id, title, capacity, now.Format("2006-01-02 15:04:05.000"),
-		); err != nil {
-			return err
-		}
-		schedule.ID = id
-		schedule.Title = title
-		schedule.Capacity = capacity
-		schedule.CreatedAt = now
+	id := generateID(nil, "schedules")
+	title := r.PostFormValue("title")
+	capacity, _ := strconv.Atoi(r.PostFormValue("capacity"))
 
-		return nil
-	})
-
+	scheduleMu.Lock()
+	defer scheduleMu.Unlock()
+	_, err := db.Query(
+		"INSERT INTO `schedules` (`id`, `title`, `capacity`, `created_at`) VALUES (?, ?, ?, ?)",
+		id, title, capacity, now.Format("2006-01-02 15:04:05.000"),
+	)
 	if err != nil {
 		sendErrorJSON(w, err, 500)
-	} else {
-		sendJSON(w, schedule, 200)
+		return
 	}
+	rdb.Set(rctx, id, capacity, 0)
+	scheduleCapacityMap[id] = capacity
+
+	schedule.ID = id
+	schedule.Title = title
+	schedule.Capacity = capacity
+	schedule.CreatedAt = now
+
+	sendJSON(w, schedule, 200)
+}
+
+func runTx(key string, capacity int) func(tx *redis.Tx) error {
+	txf := func(tx *redis.Tx) error {
+		n, err := tx.Get(rctx, key).Int()
+		if err != nil && err != redis.Nil {
+			return err
+		}
+
+		// actual opperation (local in optimistic lock)
+		n = n + 1
+		if n > capacity {
+			return errors.New("over capacity")
+		}
+
+		// runs only if the watched keys remain unchanged
+		_, err = tx.TxPipelined(rctx, func(pipe redis.Pipeliner) error {
+			// pipe handles the error case
+			pipe.Set(rctx, key, n, 0)
+
+			return nil
+		})
+		return err
+	}
+	return txf
 }
 
 func createReservationHandler(w http.ResponseWriter, r *http.Request) {
@@ -407,70 +457,69 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 	scheduleID := r.PostFormValue("schedule_id")
 	userID := getCurrentUser(r).ID
-	user := &User{}
 	now := time.Now()
-	schedule := &Schedule{}
 	reservation := &Reservation{}
-	var genid string
+	reservationID := generateID(nil, "reservation")
 
-	err := transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		// join
-		if err := tx.QueryRowxContext(ctx, "SELECT reserved, capacity FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE ", scheduleID).StructScan(schedule); err != nil {
-			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
-		}
-
-		if schedule.Reserved >= schedule.Capacity {
-			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
-		}
-
-		r := rdb.Get(rctx, userID)
-		if r.Err() == redis.Nil {
-			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
-		}
-		buser, err := r.Bytes()
-		if err != nil {
-			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
-		}
-		err = json.Unmarshal(buser, user)
-		if err != nil {
-			return sendErrorJSON(w, fmt.Errorf("user not found"), 403)
-		}
-
-		found := 0
-		tx.QueryRowContext(ctx, "SELECT 1 FROM `reservations` WHERE `schedule_id` = ? AND `user_id` = ? LIMIT 1", scheduleID, userID).Scan(&found)
-		if found == 1 {
-			return sendErrorJSON(w, fmt.Errorf("already taken"), 403)
-		}
-
-		id := generateID(tx, "schedules")
-
-		if _, err := tx.ExecContext(
-			ctx,
-			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			id, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
-		); err != nil {
-			return err
-		}
-
-		genid = id
-		reserved := schedule.Reserved + 1
-
-		if _, err := tx.ExecContext(
-			ctx,
-			"UPDATE `schedules` SET `reserved` = ? WHERE `id` = ?",
-			reserved, scheduleID,
-		); err != nil {
-			return err
-		}
-
-		return nil
-	})
-	if err != nil {
-		sendErrorJSON(w, err, 500)
+	user := getUserFromCache(userID)
+	if user == nil {
+		sendErrorJSON(w, fmt.Errorf("user not found"), 403)
 		return
 	}
 
-	reservation.ID = genid
+	// check if already user reserve this schedule
+	reserveMu.RLock()
+	reservedKey := scheduleID + userID
+	_, ok := reservedMap[reservedKey]
+	reserveMu.RUnlock()
+	if ok {
+		sendErrorJSON(w, fmt.Errorf("already taken"), 403)
+		return
+	}
+
+	capacity, ok := getScheduleCapacityFromCache(scheduleID)
+	if !ok {
+		sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
+		return
+	}
+
+	for {
+		err := rdb.Watch(rctx, runTx(scheduleID, capacity), scheduleID)
+		if err == nil {
+			fmt.Println(scheduleID, "Success")
+			break
+		} else if err.Error() == "over capacity" {
+			sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
+			return
+		} else {
+			fmt.Println(err, "retry")
+		}
+	}
+	reserveMu.Lock()
+	reservedMap[reservedKey] = true
+	reserveMu.Unlock()
+
+	// ensure capacity is not full
+	// need lock?
+	_, err := db.Query(
+		"UPDATE `schedules` SET `reserved` = reserved + 1 WHERE `id` = ?",
+		scheduleID,
+	)
+	if err != nil {
+		sendErrorJSON(w, fmt.Errorf("schedule udpate failed"), 500)
+		return
+	}
+
+	_, err = db.Query(
+		"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		reservationID, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
+	)
+	if err != nil {
+		sendErrorJSON(w, fmt.Errorf("reservation creation failed"), 500)
+		return
+	}
+
+	reservation.ID = reservationID
 	reservation.ScheduleID = scheduleID
 	reservation.UserID = userID
 	reservation.CreatedAt = now
@@ -505,7 +554,6 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 	// joins
 	schedule := &Schedule{}
 	if err := db.QueryRowxContext(r.Context(), "SELECT * FROM `schedules` WHERE `id` = ? LIMIT 1", id).StructScan(schedule); err != nil {
-
 		sendErrorJSON(w, err, 500)
 		return
 	}
