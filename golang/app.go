@@ -27,6 +27,10 @@ var (
 	cacheMap  = make(map[string]*User)
 )
 
+var (
+	scheIdCapacityMap = make(map[string]int)
+)
+
 type User struct {
 	ID        string    `db:"id" json:"id"`
 	Email     string    `db:"email" json:"email"`
@@ -393,6 +397,8 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		schedule.Capacity = capacity
 		schedule.CreatedAt = now
 
+		scheIdCapacityMap[id] = capacity
+
 		return nil
 	})
 
@@ -417,7 +423,6 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 	userID := getCurrentUser(r).ID
 	user := &User{}
 	now := time.Now()
-	schedule := &Schedule{}
 	reservation := &Reservation{}
 
 	res := rdb.Get(rctx, userID)
@@ -446,30 +451,28 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 	id := generateID(nil, "schedules")
 
+	incr := rdb.Incr(ctx, scheduleID)
+	if incr.Err() != nil {
+		sendErrorJSON(w, err, 500)
+		return
+	}
+	reserved := int(incr.Val())
+
+	capacity, ok := scheIdCapacityMap[scheduleID]
+	if !ok {
+		sendErrorJSON(w, fmt.Errorf("scheIdCapacityMapに値が無い！"), 500)
+		return
+	}
+	if reserved >= capacity {
+		sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
+		return
+	}
+
 	err = transaction(r.Context(), &sql.TxOptions{}, func(ctx context.Context, tx *sqlx.Tx) error {
-		// join
-		if err := tx.QueryRowxContext(ctx, "SELECT reserved, capacity FROM `schedules` WHERE `id` = ? LIMIT 1 FOR UPDATE ", scheduleID).StructScan(schedule); err != nil {
-			return sendErrorJSON(w, fmt.Errorf("schedule not found"), 403)
-		}
-
-		if schedule.Reserved >= schedule.Capacity {
-			return sendErrorJSON(w, fmt.Errorf("capacity is already full"), 403)
-		}
-
 		if _, err := tx.ExecContext(
 			ctx,
 			"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			id, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
-		); err != nil {
-			return err
-		}
-
-		reserved := schedule.Reserved + 1
-
-		if _, err := tx.ExecContext(
-			ctx,
-			"UPDATE `schedules` SET `reserved` = ? WHERE `id` = ?",
-			reserved, scheduleID,
 		); err != nil {
 			return err
 		}
@@ -503,6 +506,22 @@ func schedulesHandler(w http.ResponseWriter, r *http.Request) {
 			sendErrorJSON(w, err, 500)
 			return
 		}
+		var count int
+		incr := rdb.Get(context.TODO(), schedule.ID)
+		if incr.Err() == redis.Nil {
+			count = 0
+		} else if incr.Err() != nil {
+			sendErrorJSON(w, err, 500)
+			return
+		} else {
+			count, err = strconv.Atoi(incr.Val())
+			if err != nil {
+				sendErrorJSON(w, err, 500)
+				return
+			}
+		}
+		schedule.Reserved = count
+
 		schedules = append(schedules, schedule)
 	}
 
@@ -520,6 +539,23 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 		sendErrorJSON(w, err, 500)
 		return
 	}
+
+	var count int
+	incr := rdb.Get(r.Context(), schedule.ID)
+	if incr.Err() == redis.Nil {
+		count = 0
+	} else if incr.Err() != nil {
+		sendErrorJSON(w, incr.Err(), 500)
+		return
+	} else {
+		var err error
+		count, err = strconv.Atoi(incr.Val())
+		if err != nil {
+			sendErrorJSON(w, err, 500)
+			return
+		}
+	}
+	schedule.Reserved = count
 
 	if err := getReservations(r, schedule); err != nil {
 		sendErrorJSON(w, err, 500)
