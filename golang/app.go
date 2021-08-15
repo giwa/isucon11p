@@ -310,6 +310,7 @@ func initializeHandler(w http.ResponseWriter, r *http.Request) {
 
 		return nil
 	})
+
 	if err != nil {
 		sendErrorJSON(w, err, 500)
 	} else {
@@ -402,7 +403,7 @@ func createScheduleHandler(w http.ResponseWriter, r *http.Request) {
 
 	scheduleMu.Lock()
 	defer scheduleMu.Unlock()
-	_, err := db.Query(
+	_, err := db.Exec(
 		"INSERT INTO `schedules` (`id`, `title`, `capacity`, `created_at`) VALUES (?, ?, ?, ?)",
 		id, title, capacity, now.Format("2006-01-02 15:04:05.000"),
 	)
@@ -506,7 +507,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 	// ensure capacity is not full
 	// need lock?
-	_, err := db.Query(
+	_, err := db.Exec(
 		"UPDATE `schedules` SET `reserved` = reserved + 1 WHERE `id` = ?",
 		scheduleID,
 	)
@@ -515,7 +516,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = db.Query(
+	_, err = db.Exec(
 		"INSERT INTO `reservations` (`id`, `schedule_id`, `user_id`, `created_at`, `user_email`, `user_nickname`, `user_staff`, `user_created_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 		reservationID, scheduleID, userID, now.Format("2006-01-02 15:04:05.000"), user.Email, user.Nickname, user.Staff, user.CreatedAt,
 	)
@@ -557,11 +558,13 @@ func scheduleHandler(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 
 	// joins
+	scheduleMu.RLock()
 	schedule := &Schedule{}
 	if err := db.QueryRowxContext(r.Context(), "SELECT * FROM `schedules` WHERE `id` = ? LIMIT 1", id).StructScan(schedule); err != nil {
 		sendErrorJSON(w, err, 500)
 		return
 	}
+	scheduleMu.RUnlock()
 
 	if err := getReservations(r, schedule); err != nil {
 		sendErrorJSON(w, err, 500)
