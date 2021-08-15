@@ -530,7 +530,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 
 func schedulesHandler(w http.ResponseWriter, r *http.Request) {
 	schedules := []*Schedule{}
-	rows, err := db.QueryxContext(r.Context(), "SELECT * FROM `schedules` ORDER BY `id` DESC")
+	rows, err := db.QueryxContext(r.Context(), "SELECT * FROM `schedules`")
 	if err != nil {
 		sendErrorJSON(w, err, 500)
 		return
