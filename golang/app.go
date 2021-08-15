@@ -437,7 +437,6 @@ func runTx(key string, capacity int) func(tx *redis.Tx) error {
 		_, err = tx.TxPipelined(rctx, func(pipe redis.Pipeliner) error {
 			// pipe handles the error case
 			pipe.Set(rctx, key, n, 0)
-
 			return nil
 		})
 		return err
@@ -483,6 +482,7 @@ func createReservationHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("capacity: %d", capacity)
 	for {
 		err := rdb.Watch(rctx, runTx(scheduleID, capacity), scheduleID)
 		if err == nil {
